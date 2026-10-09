@@ -7,94 +7,80 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// AS SUAS CREDENCIAIS OFICIAIS
 const AMAZON_TRACKING_ID = 'rms0cf-20'; 
 const LOMADEE_API_KEY = process.env.LOMADEE_API_KEY; 
 
 app.get('/buscar', async (req, res) => {
     const termoDeBusca = req.query.q || 'smartphone';
-    const termoFormatado = termoDeBusca.toLowerCase();
-
-    // 1. GERADOR DE IMAGENS INTELIGENTE BASEADO NA PESQUISA
-    let imageUrl = 'https://m.media-amazon.com/images/I/61NlB0K4NfL._AC_SX679_.jpg'; // Imagem padrão de alta qualidade
-    if (termoFormatado.includes('galaxy') || termoFormatado.includes('samsung') || termoFormatado.includes('s23')) {
-        imageUrl = 'https://m.media-amazon.com/images/I/61VfL-aiwML._AC_SX679_.jpg';
-    } else if (termoFormatado.includes('iphone') || termoFormatado.includes('apple')) {
-        imageUrl = 'https://m.media-amazon.com/images/I/71w3oJ7aWyL._AC_SX679_.jpg';
-    } else if (termoFormatado.includes('tv') || termoFormatado.includes('smart')) {
-        imageUrl = 'https://m.media-amazon.com/images/I/61NlB0K4NfL._AC_SX679_.jpg';
-    } else if (termoFormatado.includes('geladeira') || termoFormatado.includes('eletro')) {
-        imageUrl = 'https://m.media-amazon.com/images/I/51b74g412wL._AC_SX679_.jpg';
-    }
 
     try {
-        let produtosVarejo = [];
-        
-        // Tenta consultar a Lomadee, mas se falhar, usa os preços de mercado simulados inteligentemente
+        let ofertasLomadee = [];
+        let imagemProduto = 'https://via.placeholder.com/300?text=PrecoScan';
+
+        // Tenta buscar dados reais na Lomadee
         if (LOMADEE_API_KEY) {
             try {
-                const urlLomadee = `https://api.lomadee.com.br/affiliate/products?search=${encodeURIComponent(termoDeBusca)}&limit=5`;
+                // Tentativa limpa na API atualizada
+                const urlLomadee = `https://api.lomadee.com.br/affiliate/products?name=${encodeURIComponent(termoDeBusca)}&limit=3`;
                 const resposta = await axios.get(urlLomadee, { headers: { 'x-api-key': LOMADEE_API_KEY } });
-                const ofertas = resposta.data.data || [];
-                
-                produtosVarejo = ofertas
-                    .filter(o => o.price && o.price > 0 && o.link)
-                    .slice(0, 2)
-                    .map(oferta => ({
+                const itens = resposta.data.data || [];
+
+                if (itens.length > 0) {
+                    if (itens[0].thumbnail) imagemProduto = itens[0].thumbnail;
+
+                    ofertasLomadee = itens.map(oferta => ({
                         nome: oferta.store?.name || 'Loja Parceira',
-                        preco: oferta.price,
-                        link_afiliado: oferta.link,
-                        frete_gratis: true,
+                        preco: oferta.price || 0, // Preço real devolvido pela API
+                        link_afiliado: oferta.link || '#',
+                        frete_gratis: false,
                         rating: 4.8,
-                        vendas: '12k+'
+                        vendas: 'Parceiro Oficial'
                     }));
+                }
             } catch (err) {
-                console.log('Lomadee ignorada, ativando motor de cotação inteligente.');
+                console.log('Aviso: Lomadee indisponível para esta busca exata.');
             }
         }
 
-        // 2. SISTEMA DE RANKING INTELIGENTE COM PREÇOS REAIS DE MERCADO
-        // Se a Lomadee não devolver produtos, geramos cotações realistas para o ranking funcionar perfeitamente
-        if (produtosVarejo.length === 0) {
-            produtosVarejo = [
+        // Se a API externa não retornar itens reais, construímos as opções de forma transparente
+        if (ofertasLomadee.length === 0) {
+            ofertasLomadee = [
                 {
-                    nome: 'Magalu',
-                    preco: 2399.00,
+                    nome: 'Magalu (Parceiro)',
+                    preco: 0.00, // Indica preço sob consulta para evitar valores falsos
                     frete_gratis: true,
                     rating: 4.8,
-                    vendas: '15k+',
+                    vendas: 'Ver na Loja',
                     link_afiliado: `https://www.magazineluiza.com.br/busca/${encodeURIComponent(termoDeBusca)}/`
                 },
                 {
-                    nome: 'Casas Bahia',
-                    preco: 2450.00,
+                    nome: 'Casas Bahia (Parceiro)',
+                    preco: 0.00,
                     frete_gratis: false,
                     rating: 4.7,
-                    vendas: '9k+',
+                    vendas: 'Ver na Loja',
                     link_afiliado: `https://www.casasbahia.com.br/${encodeURIComponent(termoDeBusca)}/b`
                 }
             ];
         }
 
-        // Oferta da Amazon com preço competitivo para fechar o Top 3 do Ranking
-        const linkAmazonDinâmico = `https://www.amazon.com.br/s?k=${encodeURIComponent(termoDeBusca)}&tag=${AMAZON_TRACKING_ID}`;
+        // Opção da Amazon com link de afiliado oficial
+        const linkAmazon = `https://www.amazon.com.br/s?k=${encodeURIComponent(termoDeBusca)}&tag=${AMAZON_TRACKING_ID}`;
         const ofertaAmazon = {
             nome: 'Amazon',
-            preco: 2349.00, 
+            preco: 0.00, 
             frete_gratis: true,
             rating: 4.9,
-            vendas: '35k+',
-            link_afiliado: linkAmazonDinâmico
+            vendas: 'Associado',
+            link_afiliado: linkAmazon
         };
 
-        // Junta tudo num array e ORDENA do mais barato para o mais caro (Ranking Matemático)
-        let rankingCompleto = [ofertaAmazon, ...produtosVarejo];
-        rankingCompleto.sort((a, b) => a.preco - b.preco);
+        const rankingFinal = [ofertaAmazon, ...ofertasLomadee];
 
         const resultados = [{
             product_name: termoDeBusca.toUpperCase(),
-            image_url: imageUrl, 
-            ofertas: rankingCompleto
+            image_url: imagemProduto, 
+            ofertas: rankingFinal
         }];
 
         res.json(resultados);
