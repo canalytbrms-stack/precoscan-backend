@@ -9,7 +9,7 @@ app.use(express.json());
 
 const AMAZON_TRACKING_ID = 'rms0cf-20'; 
 const LOMADEE_API_KEY = process.env.LOMADEE_API_KEY; 
-const LOMADEE_BASE_URL = 'https://api.lomadee.com.br'; // URL oficial de produção
+const LOMADEE_BASE_URL = 'https://api.lomadee.com.br';
 
 app.get('/buscar', async (req, res) => {
     const termo = (req.query.q || '').trim();
@@ -18,12 +18,14 @@ app.get('/buscar', async (req, res) => {
         return res.json([]);
     }
 
+    const termoLower = termo.toLowerCase();
+
     try {
-        // Chamada oficial respeitando a documentação da Lomadee com o parâmetro 'search'
+        // Chamada oficial à API da Lomadee usando o parâmetro 'search'
         const resposta = await axios.get(`${LOMADEE_BASE_URL}/affiliate/products`, {
             params: { 
                 search: termo,
-                limit: 20,
+                limit: 50,
                 page: 1,
                 isAvailable: true
             },
@@ -32,10 +34,32 @@ app.get('/buscar', async (req, res) => {
 
         const listaProdutos = resposta.data.data || [];
 
-        if (listaProdutos.length > 0) {
-            // Mapeia os produtos reais retornados pela API oficial
-            const resultadosFormatados = listaProdutos.slice(0, 5).map(item => {
-                // Extrai a imagem com segurança (da lista principal ou das opções)
+        // FILTRO INTELIGENTE ANTI-LIXO (Elimina produtos médicos, saúde e falsos positivos de buscas amplas)
+        const palavrasChaveBusca = termoLower.split(' ').filter(p => p.length > 2);
+        
+        const filtrados = listaProdutos.filter(item => {
+            if (!item.name || !item.available) return false;
+            const nomeProduto = item.name.toLowerCase();
+
+            // Se a busca for por eletrônicos/TV/Smartphone, barra produtos de saúde e medicina incorretos
+            if (termoLower.includes('tv') || termoLower.includes('smartphone') || termoLower.includes('iphone') || termoLower.includes('notebook')) {
+                if (nomeProduto.includes('glicose') || nomeProduto.includes('medidor') || nomeProduto.includes('pressão') || nomeProduto.includes('tiras') || nomeProduto.includes('infantil')) {
+                    return false;
+                }
+            }
+
+            // Se for uma busca curta (ex: "smart tv"), valida relevância
+            if (palavrasChaveBusca.length > 0) {
+                const atendeRelevancia = palavrasChaveBusca.some(palavra => nomeProduto.includes(palavra));
+                if (!atendeRelevancia) return false;
+            }
+
+            return true;
+        });
+
+        if (filtrados.length > 0) {
+            const resultadosFormatados = filtrados.slice(0, 5).map(item => {
+                // Extração segura de imagens
                 let imageUrl = 'https://via.placeholder.com/300';
                 if (item.images && item.images.length > 0 && item.images[0].url) {
                     imageUrl = item.images[0].url;
@@ -43,18 +67,21 @@ app.get('/buscar', async (req, res) => {
                     imageUrl = item.options[0].images[0].url;
                 }
 
-                // Extrai o preço real da primeira opção disponível
+                // Extração do preço real de catálogo
                 let precoReal = 0;
                 if (item.options && item.options[0]?.pricing?.[0]?.price) {
                     precoReal = item.options[0].pricing[0].price;
                 }
 
-                // Cria o array de ofertas comparativas para o item
+                // Links oficiais de afiliado rastreados
+                const linkAfiliadoLomadee = item.url || '#';
+                const linkAmazonAfiliado = `https://www.amazon.com.br/s?k=${encodeURIComponent(item.name)}&tag=${AMAZON_TRACKING_ID}`;
+
                 let ofertas = [
                     {
-                        nome: 'Loja Parceira (Lomadee)',
+                        nome: item.store?.name || 'Parceiro Oficial',
                         preco: precoReal > 0 ? precoReal : 1999.00,
-                        link_afiliado: item.url || '#',
+                        link_afiliado: linkAfiliadoLomadee,
                         frete_gratis: true,
                         rating: 4.8,
                         vendas: 'Parceiro Oficial'
@@ -62,14 +89,14 @@ app.get('/buscar', async (req, res) => {
                     {
                         nome: 'Amazon',
                         preco: precoReal > 0 ? Number((precoReal * 0.98).toFixed(2)) : 1949.00,
-                        link_afiliado: `https://www.amazon.com.br/s?k=${encodeURIComponent(item.name)}&tag=${AMAZON_TRACKING_ID}`,
+                        link_afiliado: linkAmazonAfiliado,
                         frete_gratis: true,
                         rating: 4.9,
                         vendas: 'Associado'
                     }
                 ];
 
-                // Ordena do menor para o maior preço
+                // Ordenação matemática do menor para o maior preço
                 ofertas.sort((a, b) => a.preco - b.preco);
 
                 return {
@@ -82,32 +109,8 @@ app.get('/buscar', async (req, res) => {
             return res.json(resultadosFormatados);
         }
 
-        // Se a API da Lomadee não retornar itens para essa busca específica, entregamos um fallback inteligente para não deixar o utilizador sem resposta
-        const linkAmazonFallback = `https://www.amazon.com.br/s?k=${encodeURIComponent(termo)}&tag=${AMAZON_TRACKING_ID}`;
-        const urlMagaluFallback = `https://www.magazineluiza.com.br/busca/${encodeURIComponent(termo)}/`;
-
-        return res.json([{
-            product_name: termo.toUpperCase(),
-            image_url: 'https://m.media-amazon.com/images/I/61NlB0K4NfL._AC_SX679_.jpg',
-            ofertas: [
-                {
-                    nome: 'Amazon',
-                    preco: 2499.00,
-                    frete_gratis: true,
-                    rating: 4.9,
-                    vendas: 'Direto',
-                    link_afiliado: linkAmazonFallback
-                },
-                {
-                    nome: 'Magalu',
-                    preco: 2549.00,
-                    frete_gratis: true,
-                    rating: 4.8,
-                    vendas: 'Parceiro',
-                    link_afiliado: urlMagaluFallback
-                }
-            ]
-        }]);
+        // Se não houver correspondências válidas após a filtragem
+        return res.json([]);
 
     } catch (erro) {
         console.error('Erro na API Lomadee:', erro.response ? JSON.stringify(erro.response.data) : erro.message);
