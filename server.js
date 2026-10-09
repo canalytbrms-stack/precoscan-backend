@@ -10,7 +10,7 @@ app.use(express.json());
 // AS SUAS CREDENCIAIS OFICIAIS
 const AMAZON_TRACKING_ID = 'rms0cf-20'; 
 const LOMADEE_SOURCE_ID = '1968ec3d-110c-4bf7-8ea5-3be258077c96';
-const LOMADEE_API_KEY = process.env.LOMADEE_API_KEY; // A chave longa virá do Render para segurança máxima
+const LOMADEE_API_KEY = process.env.LOMADEE_API_KEY; 
 
 app.get('/buscar', async (req, res) => {
     const termoDeBusca = req.query.q || 'smartphone'; 
@@ -18,34 +18,34 @@ app.get('/buscar', async (req, res) => {
     try {
         let produtosVarejo = [];
         
-        // 1. Busca Oficial na Nova API da Lomadee
         if (LOMADEE_API_KEY) {
             try {
-                const resposta = await axios.get(`https://api.lomadee.com.br/affiliate/products?keyword=${encodeURIComponent(termoDeBusca)}&sourceId=${LOMADEE_SOURCE_ID}`, {
-                    headers: {
-                        'x-api-key': LOMADEE_API_KEY
-                    }
+                // Tentativa com limit=10 (Regra da Nova API)
+                const urlLomadee = `https://api.lomadee.com.br/affiliate/products?keyword=${encodeURIComponent(termoDeBusca)}&sourceId=${LOMADEE_SOURCE_ID}&limit=10`;
+                
+                const resposta = await axios.get(urlLomadee, {
+                    headers: { 'x-api-key': LOMADEE_API_KEY }
                 });
                 
                 const ofertas = resposta.data.data || [];
                 produtosVarejo = ofertas.slice(0, 3).map(oferta => ({
-                    nome: oferta.store ? oferta.store.name : 'Loja Parceira',
-                    preco: oferta.price,
-                    link_afiliado: oferta.link,
-                    frete_gratis: false, // Será atualizado futuramente com frete real
+                    nome: oferta.store?.name || oferta.brand?.name || 'Loja Parceira',
+                    preco: oferta.price || 0,
+                    link_afiliado: oferta.link || '',
+                    frete_gratis: false,
                     rating: 4.8,
                     vendas: 'Ver site'
                 }));
             } catch (erroLomadee) {
-                console.error('Aviso Lomadee:', erroLomadee.message);
+                // MODO ESPIÃO: Vai imprimir o erro exato que a Lomadee está a devolver!
+                console.error('Erro DETALHADO Lomadee:', erroLomadee.response ? JSON.stringify(erroLomadee.response.data) : erroLomadee.message);
             }
         }
 
-        // 2. Estratégia de "Bypass" para as 10 vendas na Amazon
         const linkAmazonDinâmico = `https://www.amazon.com.br/s?k=${encodeURIComponent(termoDeBusca)}&tag=${AMAZON_TRACKING_ID}`;
         const ofertaAmazonFallback = {
             nome: 'Amazon',
-            preco: 0.00, // Preço zero para ocultar no app e forçar o clique do cliente
+            preco: 0.00, 
             frete_gratis: true,
             rating: 4.9,
             vendas: 'Ver no site',
@@ -53,7 +53,6 @@ app.get('/buscar', async (req, res) => {
             mensagem_botao: 'Ver Preço na Amazon'
         };
 
-        // 3. Enviar para a tela do Celular
         const resultados = [{
             product_name: `Buscando: ${termoDeBusca}`,
             image_url: 'https://via.placeholder.com/300?text=Pre%C3%A7oScan', 
@@ -66,7 +65,7 @@ app.get('/buscar', async (req, res) => {
         res.json(resultados);
 
     } catch (erro) {
-        console.error('Erro no servidor:', erro.message);
+        console.error('Erro interno:', erro.message);
         res.status(500).json({ erro: 'Falha interna na busca.' });
     }
 });
