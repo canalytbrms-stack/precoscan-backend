@@ -7,8 +7,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// AS SUAS CREDENCIAIS OFICIAIS
+// CREDENCIAIS
 const AMAZON_TRACKING_ID = 'rms0cf-20'; 
+const LOMADEE_SOURCE_ID = '1968ec3d-110c-4bf7-8ea5-3be258077c96';
 const LOMADEE_API_KEY = process.env.LOMADEE_API_KEY; 
 
 app.get('/buscar', async (req, res) => {
@@ -19,13 +20,9 @@ app.get('/buscar', async (req, res) => {
         
         if (LOMADEE_API_KEY) {
             try {
-                // Correção exata baseada no erro: trocamos 'keyword' por 'q' e removemos 'sourceId'
-                const urlLomadee = `https://api.lomadee.com.br/affiliate/products?q=${encodeURIComponent(termoDeBusca)}&limit=10`;
-                
-                const resposta = await axios.get(urlLomadee, {
-                    headers: { 'x-api-key': LOMADEE_API_KEY }
-                });
-                
+                // TENTATIVA 1: Nova API com o parâmetro 'search'
+                const urlLomadeeNova = `https://api.lomadee.com.br/affiliate/products?search=${encodeURIComponent(termoDeBusca)}&limit=10`;
+                const resposta = await axios.get(urlLomadeeNova, { headers: { 'x-api-key': LOMADEE_API_KEY } });
                 const ofertas = resposta.data.data || [];
                 produtosVarejo = ofertas.slice(0, 2).map(oferta => ({
                     nome: oferta.store?.name || oferta.brand?.name || 'Loja Parceira',
@@ -35,12 +32,27 @@ app.get('/buscar', async (req, res) => {
                     rating: 4.8,
                     vendas: 'Ver site'
                 }));
-            } catch (erroLomadee) {
-                console.error('Erro DETALHADO Lomadee:', erroLomadee.response ? JSON.stringify(erroLomadee.response.data) : erroLomadee.message);
+            } catch (erro1) {
+                try {
+                    // TENTATIVA 2: Se a nova API bloquear, usamos a V3 Clássica
+                    const urlV3 = `https://api.lomadee.com/v3/${LOMADEE_SOURCE_ID}/offer/_search?keyword=${encodeURIComponent(termoDeBusca)}`;
+                    const respV3 = await axios.get(urlV3);
+                    const ofertasV3 = respV3.data.offers || [];
+                    produtosVarejo = ofertasV3.slice(0, 2).map(oferta => ({
+                        nome: oferta.store?.name || 'Loja Parceira',
+                        preco: oferta.price || 0,
+                        link_afiliado: oferta.link || '',
+                        frete_gratis: false,
+                        rating: 4.8,
+                        vendas: 'Ver site'
+                    }));
+                } catch (erro2) {
+                    console.error('Ambas as rotas da Lomadee falharam.');
+                }
             }
         }
 
-        // SISTEMA ANTI-FALHAS: Se a Lomadee falhar ou não tiver o produto, criamos as lojas manualmente!
+        // TENTATIVA 3 (ANTI-FALHAS): Se a Lomadee não devolver nada, garantimos o Layout com Magalu e Casas Bahia
         if (produtosVarejo.length === 0) {
             produtosVarejo = [
                 {
